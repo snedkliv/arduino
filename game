@@ -1,0 +1,1333 @@
+//#include <arduino.h>??
+#include <stdio.h> //Behövs kanske inte
+#include <stdint.h>	//Behövs kanske inte
+//#include <Projekt/bilbana/grafik.h>
+
+#include <LiquidCrystal.h>
+#include "C:\Users\Sn\Dropbox\Apps\ArduinoDroid\GraphicsLib\GraphicsLib.h"
+
+#define CHOICE_QUIT 11
+#define CHOICE_RACE 99
+#define CHOICE_RACE_SINGLEPLAYER 42
+#define CHOICE_RACE_MULTIPLAYER 442
+#define CHOICE_DEATHMATCH 12
+#define CHOICE_DEATHMATCH_ATTENTION 999999999
+#define CHOICE_DEATHMATCH_MEDITATION 321
+#define CHOICE_TIME_ATTACK 33
+#define CHOICE_TIMEATTACK_SINGLEPLAYER 321321321
+#define CHOICE_TIMEATTACK_MULTIPLAYER 421
+#define ATTENTION_GAME 729
+#define MEDITATION_GAME 730
+#define GAME_RUNNING 992
+
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+
+//KNAPPAR
+//Digitala
+const int nextPin = 8;
+const int selectPin = 7;
+const int quitPin = 95;
+const int lapPinOne = 9192328;
+const int lapPinTwo = 992321328;
+
+
+//States
+int nextState = 0;
+int selectState = 0;
+//int quitState = 0;
+int lapStateOne = 0;
+int lapStateTwo = 0;
+
+int prevLapStateOne = 0;
+int prevLapStateTwo = 0;
+
+//TIMERS
+unsigned long time;
+unsigned long breakTime = 0;
+unsigned long printTime = 0;
+
+//Variabler som ändras i koden
+int selval = 1;					//Används för menynavigering
+int running = 0;				//Används av spel (1 då spel körs)
+int winner = 99;				//Identifierar vilken vinnaren är för funktionen PrintWinner();
+
+int gameMode = 0;				//Parameter som väljs ur menyn eller togglas då switchState==HÖG (Förutom i singleplayer race)
+int playerNum = 0;				//Parameter som väljs ur menyn och används för att anropa spelfunktioner
+int numberOfLaps = 0;			//Parameter som väljs ur menyn och används för att anropa spelfunktioner
+int triggerLevel = 0;			//Parameter som väljs ur menyn och används för att anropa spelfunktioner
+
+
+
+int lapNumberOne = 0;			//Varvnummer för spelare 1
+int lapNumberTwo = 0;			//Varvnummer för spelare 2
+int timeOneStart = 0;			//Tid då spelare 1 startar ett nytt varv
+int timeTwoStart = 0;			//Tid då spelare 2 startar ett nytt varv
+
+const int playerOneThrottlePin = 6; //TEMP 
+const int playerTwoThrottlePin = 9; //TEMP 
+
+
+int playerOneAttention = 0;
+int playerTwoAttention = 0;
+int playerOneMeditation = 0;
+int playerTwoMeditation = 0;
+
+
+int lastColumn, lastLine;		//Används för att enklare kunna anropa funktionen PrintLineColumnText();
+
+String dataIdentifier;			//Identifierar datatyp vid seriell överföring
+
+//Ändringsbara variabler
+int buttPress = 350;			//Antal ms som minst måste passera mellan knapptryckningar
+int printDelay = 35;			//Antal ms som pausas i print-funktionen PrintLineColumnText(); för att säkerställa korrekt LCD-återgivning
+int gameDrawFPS = 10;			//Den högsta frame-raten som tillåts skrivas ut (används hittils bara för klockan i time-attack)
+
+
+//Osnyggare variabler
+int firstRunTime = 1;	
+int gameStartTime = 0;
+int antalMinuter = 0;
+int fpsTime = 1000*(1/gameDrawFPS);
+
+void setup()
+{
+	//Initialbliisera LCD-display
+	lcd.begin(16,2);						
+	lcd.blink();
+  
+	//Initialisera ingångar och utgångar
+	pinMode(nextPin, INPUT);
+	pinMode(selectPin, INPUT);
+	//pinMode(quitPin, INPUT);
+	pinMode(lapPinOne, INPUT);
+	pinMode(lapPinTwo, INPUT);
+  
+	//Starta seriekommunikation (nu bara för felsökning, blir antagligen annan baud-rate med BT)
+	Serial.begin(9600);
+
+	pinMode(13, OUTPUT); //TEMP FÖR TEST
+
+	int testInt = LibraryTestFunction();
+
+	//Anropar grundmenyn
+	MainMenu();
+}
+
+void loop ()
+{
+}
+
+
+
+
+//Funktionerna MainMenu(); och GetMainMenuChoice(); står efter varandra här
+void MainMenu()
+{
+	DrawMainMenu();	//Rita ut menyn
+
+	int quit = 0;
+	while(!quit)	//Så länge inte quit-valet har returnerats så loopa (Onödig while)
+	{
+		switch( GetMainMenuChoice() )	//Anropa funktionen GetMainMenuChoice(); och då ett värde har returnerats från denna som matchar ett av listade "case": så kör respektive kod
+		{
+			case CHOICE_RACE:
+			RaceMenu();
+			break;
+
+			case CHOICE_DEATHMATCH:
+			DeathmatchMenu();
+			break;
+
+			case CHOICE_TIME_ATTACK:	
+			TimeattackMenu();
+			break;
+        
+			case CHOICE_QUIT:
+			DrawQuitMenu();
+			quit = 1;
+			break;
+		}
+	}
+}
+int GetMainMenuChoice()
+{
+	char awaitingChoice = 1;
+	selval = 1;
+	while ( awaitingChoice )		//Så länge inget val har gjorst så loopa..
+	{
+		UpdateMenuInputs();			//Uppdatera knappstadierna
+		if(selval == 1)
+		{
+			if (nextState == HIGH)
+			{
+				if (time > breakTime) //Om ett visst val är gjort och next-knappen trycks in och inställd tid har passerat så byt till nästa val i listan
+				{
+					lcd.setCursor(5,0);
+					selval = 2;
+					breakTime = time + buttPress;
+				}
+			}
+		}
+		if(selval == 2)
+		{
+			if (nextState == HIGH)
+				{
+					if (time > breakTime) //Om ett visst val är gjort och next-knappen trycks in och inställd tid har passerat så byt till nästa val i listan
+					{
+						lcd.setCursor(0,1);
+						selval = 3;
+						breakTime = time + buttPress;
+					}
+				}
+		}
+		if(selval == 3)
+		{
+			if (nextState == HIGH)
+			{
+				if (time > breakTime) //Om ett visst val är gjort och next-knappen trycks in och inställd tid har passerat så byt till nästa val i listan
+				{
+					lcd.setCursor(0,0);
+					selval = 1;
+					breakTime = time + buttPress;
+				}
+			}
+		}
+  
+
+		if (selectState == HIGH && selval == 1) //Om select trycks ned och ett visst val är gjort så returnera detta val (x3)
+		{
+			breakTime = time + buttPress;
+			awaitingChoice = 0;
+			return CHOICE_RACE;
+		}
+		if (selectState == HIGH && selval == 2)
+		{
+			breakTime = time + buttPress;
+			awaitingChoice = 0;
+			return CHOICE_DEATHMATCH;
+		}
+		if (selectState == HIGH && selval == 3)
+		{
+			breakTime = time + buttPress;
+			awaitingChoice = 0;
+			return CHOICE_TIME_ATTACK;
+		}
+	
+// 		if (quitState == HIGH)				//Om quit trycks ned så returnera detta
+// 		{
+// 			awaitingChoice = 0;
+// 			return CHOICE_QUIT;
+// 		}
+	}
+}
+
+//Funktionerna RaceMenu(); GetRaceMenuPlayerChoice(); och GetRaceMenuLapsChoice(); står listade efter varandra
+void RaceMenu()
+{
+	DrawRaceMenu();
+	
+	switch( GetRaceMenuPlayerChoice() )
+	{
+		case CHOICE_RACE_SINGLEPLAYER:
+		playerNum = 1;
+		break;
+
+		case CHOICE_RACE_MULTIPLAYER:
+		playerNum = 2;
+		break;
+	}
+	GetRaceMenuLapsChoice();
+}
+int GetRaceMenuPlayerChoice()
+{
+	char awaitingChoice = 1;
+	selval = 1;
+	while ( awaitingChoice )
+	{
+		UpdateMenuInputs();
+		if(selval == 1)
+		{
+			if (nextState == HIGH)
+			{
+				if (time > breakTime)
+				{
+					lcd.setCursor(5,1);
+					selval = 2;
+					breakTime = time + buttPress;
+				}
+			}
+		}
+		if(selval == 2)
+		{
+			if (nextState == HIGH)
+			{
+				if (time > breakTime)
+				{
+					lcd.setCursor(0,1);
+					selval = 1;
+					breakTime = time + buttPress;
+				}
+			}
+		}
+
+
+		if (selectState == HIGH && selval == 1)
+		{
+			breakTime = time + buttPress;
+			awaitingChoice = 0;
+			return CHOICE_RACE_SINGLEPLAYER;
+		}
+		if (selectState == HIGH && selval == 2)
+		{
+			breakTime = time + buttPress;
+			awaitingChoice = 0;
+			return CHOICE_RACE_MULTIPLAYER;
+		}
+
+// 		if (quitState == HIGH) 
+// 		{
+// 			awaitingChoice = 0;
+// 			return CHOICE_QUIT;
+// 		}
+	}
+}
+int GetRaceMenuLapsChoice()
+{
+	lcd.setCursor(11,1);
+	char awaitingChoice = 1;
+	selval = 1;
+	numberOfLaps = 1;
+	while ( awaitingChoice )
+	{
+		UpdateMenuInputs();
+		if (nextState == HIGH)
+		{
+			if (time > breakTime)
+			{
+				breakTime = time + buttPress;
+				lcd.setCursor(10,1);
+				if (numberOfLaps == 9)
+				{
+					numberOfLaps = 1;
+				}
+				else
+				{
+					numberOfLaps++;
+				}
+				delay(printDelay);
+				lcd.print(numberOfLaps);
+				lcd.setCursor(11,1);
+			}
+		}
+		
+		if (selectState == HIGH)
+		{
+			if (time > breakTime)
+			{
+				breakTime = time + buttPress;
+				awaitingChoice = 0;
+				RaceGame(playerNum,numberOfLaps);
+			}
+
+		}
+
+// 		if (quitState == HIGH) 
+// 		{
+// 			awaitingChoice = 0;
+// 			DrawQuitMenu();
+// 			break;
+// 		}
+	}
+}
+
+//Funktionerna DeathmatchMenu(); GetDeathmatchModeChoice(); och GetDeathmatchTriggerChoice(); listas efter varandra här
+void DeathmatchMenu()
+{
+	DrawDeathmatchMenu();
+
+	int quit = 0;
+
+	switch( GetDeathmatchModeChoice() )
+	{
+		case CHOICE_DEATHMATCH_ATTENTION:
+		gameMode = ATTENTION_GAME;
+		break;
+
+		case CHOICE_DEATHMATCH_MEDITATION:
+		gameMode = MEDITATION_GAME;
+		break;
+        
+		case CHOICE_QUIT:
+		DrawQuitMenu();
+		quit = 1;
+		break;
+	}
+	GetDeathmatchTriggerChoice();
+}
+int GetDeathmatchModeChoice()
+{
+	char awaitingChoice = 1;
+	selval = 1;
+	while ( awaitingChoice )
+	{
+		UpdateMenuInputs();
+		if(selval == 1)
+		{
+			if (nextState == HIGH)
+			{
+				if (time > breakTime)
+				{
+					lcd.setCursor(3,1);
+					selval = 2;
+					breakTime = time + buttPress;
+				}
+			}
+		}
+		if(selval == 2)
+		{
+			if (nextState == HIGH)
+			{
+				if (time > breakTime)
+				{
+					lcd.setCursor(0,1);
+					selval = 1;
+					breakTime = time + buttPress;
+				}
+			}
+		}
+
+
+		if (selectState == HIGH && selval == 1)
+		{
+			breakTime = time + buttPress;
+			awaitingChoice = 0;
+			return CHOICE_DEATHMATCH_ATTENTION;
+		}
+		if (selectState == HIGH && selval == 2)
+		{
+			breakTime = time + buttPress;
+			awaitingChoice = 0;
+			return CHOICE_DEATHMATCH_MEDITATION;
+		}
+// 		if (quitState == HIGH)
+// 		{
+// 			awaitingChoice = 0;
+// 			return CHOICE_QUIT;
+// 		}
+	}
+}
+int GetDeathmatchTriggerChoice()
+{
+	lcd.setCursor(8,1);
+	lcd.noBlink();
+	char awaitingChoice = 1;
+	triggerLevel = 50;
+	while ( awaitingChoice )
+	{
+		UpdateMenuInputs();
+		if (nextState == HIGH)
+		{
+			if (time > breakTime && triggerLevel <= 100)
+			{
+				breakTime = time + buttPress;
+				if (triggerLevel == 100)
+				{
+					triggerLevel = 50;
+					
+					delay(printDelay);
+					lcd.setCursor(8,1);
+					delay(printDelay);
+					lcd.print(" ");
+					
+					lcd.setCursor(6,1);
+					delay(printDelay);
+					lcd.print(triggerLevel);
+					continue;
+				}
+				triggerLevel = triggerLevel + 10;
+				lcd.setCursor(6,1);
+				delay(printDelay);
+				lcd.print(triggerLevel);
+				delay(printDelay);
+				lcd.setCursor(8,1);
+			}
+		}
+
+		if (selectState == HIGH)
+		{
+			if (time > breakTime)
+			{
+				breakTime = time + buttPress;
+				awaitingChoice = 0;
+				DeathmatchGame(gameMode,triggerLevel);
+			}
+		}
+// 			if (quitState == HIGH)
+// 			{
+// 				awaitingChoice = 0;
+// 				return CHOICE_QUIT;
+// 			}
+	}
+}
+
+//Funktionerna TimeattackMenu(); GetTimeattackPlayerChoice(); och GetTimeattackLapsChoice(); står listade efter varandra
+void TimeattackMenu()
+{
+	DrawTimeattackMenu();
+
+	int quit = 0;
+	switch( GetTimeattackPlayerChoice() )
+	{
+		case CHOICE_TIMEATTACK_SINGLEPLAYER:
+		playerNum = 1;
+		break;
+		
+		case CHOICE_TIMEATTACK_MULTIPLAYER:
+		playerNum = 1;
+		break;
+	}
+	GetTimeattackLapsChoice();
+}
+int GetTimeattackPlayerChoice()
+{
+	char awaitingChoice = 1;
+	selval = 1;
+	while ( awaitingChoice )
+	{
+		UpdateMenuInputs();
+		if(selval == 1)
+		{
+			if (nextState == HIGH)
+			{
+				if (time > breakTime)
+				{
+					lcd.setCursor(5,1);
+					selval = 2;
+					breakTime = time + buttPress;
+				}
+			}
+		}
+		if(selval == 2)
+		{
+			if (nextState == HIGH)
+			{
+				if (time > breakTime)
+				{
+					lcd.setCursor(0,1);
+					selval = 1;
+					breakTime = time + buttPress;
+				}
+			}
+		}
+
+
+		if (selectState == HIGH && selval == 1)
+		{
+			breakTime = time + buttPress;
+			awaitingChoice = 0;
+			return CHOICE_TIMEATTACK_SINGLEPLAYER;
+		}
+		if (selectState == HIGH && selval == 2)
+		{
+			breakTime = time + buttPress;
+			awaitingChoice = 0;
+			return CHOICE_TIMEATTACK_MULTIPLAYER;
+		}
+
+// 		if (quitState == HIGH) 
+// 		{
+// 			awaitingChoice = 0;
+// 			return CHOICE_QUIT;
+// 		}
+	}
+}
+int GetTimeattackLapsChoice()
+{
+	lcd.setCursor(11,1);
+	char awaitingChoice = 1;
+	selval = 1;
+	numberOfLaps = 1;
+	while ( awaitingChoice )
+	{
+		UpdateMenuInputs();
+		if (nextState == HIGH)
+		{
+			if (time > breakTime)
+			{
+				breakTime = time + buttPress;
+				lcd.setCursor(10,1);
+				if (numberOfLaps == 9)
+				{
+					numberOfLaps = 1;
+				}
+				else
+				{
+					numberOfLaps++;
+				}
+				delay(printDelay);
+				lcd.print(numberOfLaps);
+				lcd.setCursor(11,1);
+			}
+		}
+		
+		if (selectState == HIGH)
+		{
+			if (time > breakTime)
+			{
+				breakTime = time + buttPress;
+				awaitingChoice = 0;
+				TimeattackGame(playerNum,numberOfLaps);
+			}
+
+		}
+
+// 		if (quitState == HIGH)
+// 		{
+// 			awaitingChoice = 0;
+// 			DrawQuitMenu();
+// 			break;
+// 		}
+	}
+}
+
+
+//RITA GRAFIK
+//Menyer
+void DrawMainMenu()
+{
+	lcd.clear();
+	lcd.setCursor(0,0);
+	delay (printDelay);
+	lcd.print ("Race");
+	delay (printDelay);
+  
+	lcd.setCursor(5,0);
+	delay (printDelay);
+	lcd.print("Deathmatch");
+	delay (printDelay);
+  
+	lcd.setCursor(0,1);
+	lcd.print ("Time attack");
+	delay (printDelay);
+    
+	lcd.setCursor(0,0);
+	delay (printDelay);
+
+	selval = 1;
+}
+void DrawRaceMenu()
+{
+	lcd.clear();
+	lcd.setCursor(0,0);
+	delay (printDelay);
+	lcd.print("Players");
+	delay (printDelay);
+	lcd.setCursor(10,0);
+	delay (printDelay);
+	lcd.print("Laps");
+	delay (printDelay);
+	lcd.setCursor(0,1);
+	delay (printDelay);
+	lcd.print("1P   2P");
+	delay (printDelay);
+	lcd.setCursor(10,1);
+	delay (printDelay);
+	lcd.print("1");
+	lcd.setCursor(0,1);
+}
+
+void DrawDeathmatchMenu()
+{
+	lcd.clear();
+	PrintLineColumnText(0,0,"Mode");
+	PrintLineColumnText(lastLine,lastColumn+1,"Trigger");
+
+	PrintLineColumnText(1,0,"A");
+	PrintLineColumnText(lastLine,lastColumn+1,"M");
+	PrintLineColumnText(lastLine,lastColumn+1,"50");
+	lcd.setCursor(0,1);
+}
+void DrawTimeattackMenu()
+{
+	lcd.clear();
+	lcd.setCursor(0,0);
+	delay (printDelay);
+	lcd.print("Players");
+	delay (printDelay);
+	lcd.setCursor(10,0);
+	delay (printDelay);
+	lcd.print("Laps");
+	delay (printDelay);
+	lcd.setCursor(0,1);
+	delay (printDelay);
+	lcd.print("1P   2P");
+	delay (printDelay);
+	lcd.setCursor(10,1);
+	delay (printDelay);
+	lcd.print("1");
+	lcd.setCursor(0,1);
+
+	selval = 1;
+}
+void DrawQuitMenu()
+{
+	lcd.clear();
+	lcd.setCursor(0,0);
+	delay (printDelay);
+	lcd.print ("Good bye!");
+	delay (printDelay);  
+	lcd.setCursor(0,1);
+	delay (printDelay*100);  
+	lcd.print ("little fucker");
+
+	selval = 1;
+}
+
+//Spel
+void DrawRaceGame() //HÄR MÅSTE STYLING OCH KORRIGERING AV KOTINUERLIG UPPDATERING GÖRAS
+{
+	if (printTime < time)
+	{
+		printTime = time + fpsTime;
+	
+		if (playerNum == 1)
+		{
+			if (firstRunTime == 1)
+			{
+				lcd.noBlink();
+				lcd.clear();
+			
+				PrintLineColumnText(0,0,"A-lap");
+				lcd.setCursor(lastColumn,lastLine);
+				delay(printDelay);
+				lcd.print(lapNumberOne);
+				PrintLineColumnText(lastLine,lastColumn+2,"M-lap");
+				lcd.setCursor(lastColumn,lastLine);
+				delay(printDelay);
+				lcd.print(lapNumberTwo);
+
+				PrintLineColumnText(1,0,"A");
+				lcd.setCursor(lastColumn,lastLine);
+				delay(printDelay);
+				lcd.print(playerOneAttention);
+				PrintLineColumnText(lastLine,lastColumn+6,"M");
+				delay(printDelay);
+				lcd.setCursor(lastColumn,lastLine);
+				delay(printDelay);
+				lcd.print(playerOneMeditation);		
+			
+				firstRunTime = 0;
+			}
+		
+			if (playerOneAttention < 10)
+			{
+				PrintLineColumnText(1,3,"  ");
+			}
+			else if (playerOneAttention < 100)
+			{
+				PrintLineColumnText(1,4,"  ");
+			}
+			lcd.setCursor(2,1);
+			delay(printDelay);
+			lcd.print(playerOneAttention);	//TEMPORÄR
+		
+			if (playerOneMeditation < 10)
+			{
+				PrintLineColumnText(1,11,"  ");
+			}
+			else if (playerOneMeditation < 100)
+			{
+				PrintLineColumnText(1,12,"  ");
+			}
+			lcd.setCursor(10,1);
+			delay(printDelay);
+			lcd.print(playerOneMeditation);	//TEMPORÄR		
+	
+		}
+		else if (playerNum == 2)
+		{
+			if (firstRunTime == 1)
+			{
+				lcd.noBlink();
+				lcd.clear();
+			
+				PrintLineColumnText(0,0,"P1lap");
+				lcd.setCursor(lastColumn,lastLine);
+				delay(printDelay);
+				lcd.print(lapNumberOne);
+				PrintLineColumnText(lastLine,lastColumn+2,"P2lap");
+				lcd.setCursor(lastColumn,lastLine);
+				delay(printDelay);
+				lcd.print(lapNumberTwo);
+
+				PrintLineColumnText(1,0,"A");
+				lcd.setCursor(lastColumn,lastLine);
+				delay(printDelay);
+				lcd.print(playerOneAttention);
+				PrintLineColumnText(lastLine,lastColumn+6,"A");
+				delay(printDelay);
+				lcd.setCursor(lastColumn,lastLine);
+				delay(printDelay);
+				lcd.print(playerOneMeditation);
+			
+				firstRunTime = 0;
+			}
+		}
+	}
+}
+void DrawDeathMatchGame()
+{
+	lcd.clear();
+	PrintLineColumnText(0,0,"P1 Wins");
+	lcd.setCursor(lastColumn,lastLine);
+	delay(printDelay);
+	lcd.print(lapNumberOne);	
+	PrintLineColumnText(1,0,"P2 Wins");
+	lcd.setCursor(lastColumn,lastLine);
+	delay(printDelay);
+	lcd.print(lapNumberTwo);
+	
+	PrintLineColumnText(0,11,"Mode");
+	if (gameMode == ATTENTION_GAME)
+	{
+		PrintLineColumnText(1,11,"A");
+	}
+	else if (gameMode == MEDITATION_GAME)
+	{
+		PrintLineColumnText(1,11,"M");
+	}
+}
+void DrawTimeAttackGame() //hur skall den se ut för 1 resp 2 spelare? PROBLEM är inte gjord för spel längre än 10min för närvarande
+{
+	if (firstRunTime == 1)//Rita ut all grund-HUD
+	{
+		lcd.clear();
+		
+		gameStartTime = time/1000;
+		firstRunTime = 0;
+		
+		PrintLineColumnText(0,0,"Att");
+		PrintLineColumnText(lastLine,lastColumn,"Time");
+		PrintLineColumnText(lastLine,lastColumn+1,"Med");
+	}
+	
+	if (printTime < time)
+	{
+		printTime = time + fpsTime;
+		int gameTime;
+		
+		
+		//Print left column data
+		if (playerOneAttention < 10)
+		{
+			PrintLineColumnText(1,1,"  ");
+		}
+		else if (playerOneAttention < 100)
+		{
+			PrintLineColumnText(1,2,"  ");
+		}
+		lcd.setCursor(0,1);
+		delay(printDelay);
+		lcd.print(playerOneAttention);	//TEMPORÄR
+		
+		
+		//Print center column data
+		if (antalMinuter == 0)
+		{
+			gameTime = (time/1000 - gameStartTime);
+		}
+		else
+		{
+			gameTime = ((time/1000 - gameStartTime) - antalMinuter*60);
+		}
+		
+		if (gameTime < 60 && antalMinuter == 0)
+		{
+			lcd.setCursor(4,1);
+			lcd.print(gameTime);
+		}
+		else if (gameTime == 60 && antalMinuter < 10)
+		{
+			antalMinuter++;
+			gameTime = gameTime - 60;
+			
+			lcd.setCursor(4,1);	
+			lcd.print(antalMinuter);
+			lcd.print("m");
+			lcd.setCursor(6,1);
+			lcd.print("  ");
+		}
+		else if (gameTime == 60 && antalMinuter >= 10)
+		{
+			antalMinuter++;
+			gameTime = gameTime - 60;
+			
+			lcd.setCursor(4,1);
+			lcd.print(antalMinuter);
+			lcd.setCursor(6,1);
+			lcd.print("m");
+			lcd.setCursor(7,1);
+			lcd.print("  ");
+			lcd.setCursor(7,1);
+			lcd.print(gameTime);
+		}
+		else if (antalMinuter > 0 && antalMinuter < 10)
+		{
+			lcd.setCursor(6,1);
+			lcd.print(gameTime);
+		}
+		else if (antalMinuter >= 10)
+		{
+			lcd.setCursor(6,1);
+			lcd.print("m");
+			lcd.setCursor(7,1);
+			lcd.print(gameTime);
+		}
+		
+		
+		
+		//Print right column data
+		
+		if (playerOneMeditation < 10)
+		{
+			PrintLineColumnText(1,11,"  ");
+		}
+		else if (playerOneMeditation < 100)
+		{
+			PrintLineColumnText(1,12,"  ");
+		}
+		lcd.setCursor(10,1);
+		delay(printDelay);
+		lcd.print(playerOneMeditation);	//TEMPORÄR		
+		
+
+	}
+}
+
+void PrintWinner()
+{
+	char *w;
+	if (playerNum == 1)
+	{
+		lcd.clear();
+		lcd.setCursor(0,0);
+		delay (printDelay);
+		lcd.print("Winner is");
+		delay (printDelay);
+		lcd.setCursor(0,1);
+		if (winner == 1)
+		{
+			lcd.print("Attention");
+		}
+		if (winner == 2)
+		{
+			lcd.print("Meditation");
+		}
+	}
+	if (playerNum == 2)
+	{
+		lcd.clear();
+		lcd.setCursor(0,0);
+		delay (printDelay);
+		lcd.print("Winner is P");
+		delay (printDelay);
+		lcd.print(winner);	
+	}
+
+}
+
+
+
+//UPPDATERA INPUTS (Kanske räcker med en funktion för att uppdatera inputs)
+
+void UpdateMenuInputs()
+{
+	nextState = digitalRead(nextPin);
+	selectState = digitalRead(selectPin);
+	//quitState = digitalRead(quitPin);
+	time = millis();
+}
+
+
+void UpdateGameInputs()
+{
+	nextState = digitalRead(nextPin);
+	selectState = digitalRead(selectPin);
+	//lapStateOne = digitalRead(lapPinOne);
+	//lapStateTwo = digitalRead(lapPinTwo);
+	//quitState = digitalRead(quitPin);
+	time = millis();
+	
+	//BLUETOOTH IMPORT
+	GetPlayerOneState();
+}
+
+void GetPlayerOneState() //TEMPORÄR FÖR BUGGTEST GÖR MYCKET BÄTTRE KOD.....KOM IHÅG GLOBAL STRÄNG
+{
+
+	if(Serial.available())
+	{
+		char firstChar = Serial.read();
+		
+		if (firstChar == 'a')
+		{
+			playerOneAttention = Serial.parseInt();
+		}
+		else if (firstChar == 'm')
+		{
+			playerOneMeditation = Serial.parseInt();
+		}
+		else
+		{
+			Serial.flush();
+		}
+	}
+}
+// void ParseInt(String com)
+// {
+// // 		String attentionIdentifier;
+// // 		String meditationIdentifier;
+// 		
+// 		String attentionValue;
+// 		String meditationValue;
+// 		
+// /*		attentionIdentifier = com.substring(indexOf("attention"));*/
+// 		
+// 		attentionValue = com.substring(com.indexOf("attention") + 9, com.indexOf("meditation"));
+// 		meditationValue = com.substring(com.indexOf("meditation") + 9, com.indexOf("attention"));
+// 		
+// // 		if(attentionValue.equalsIgnoreCase("attention"))
+// // 		{
+// 			playerOneAttention = attentionValue.toInt();
+// 			
+// /*		}*/
+// // 		else if (meditationValue.equalsIgnoreCase("meditation"))
+// // 		{
+// 			playerOneMeditation = meditationValue.toInt();
+// // 		}
+// // 		else
+// // 		{
+// // 			Serial.print("COMMAND NOT RECOGNIZED");
+// // 		}
+//}
+
+/*com.substring(0, com.indexOf(" "))*/
+
+void UpdateGameOutputs()
+ {
+		
+		
+// 		if (gameMode == SINGLE_PLAYER)
+// 		{
+// 			playerOneAttentionThrottle = map(playerOneAttention, 0,100,0,255);
+// 			playerOneMeditationThrottle = map(playerOneMeditation, 0,100,0,255);
+// 			
+// 			analogWrite(playerOneThrottlePin,playerOneAttentionThrottle);
+// 			analogWrite(playerTwoThrottlePin,playerOneMeditationThrottle);
+// 		}
+		
+// 		if (gameMode == ATTENTION_GAME)
+// 		{
+// 			int playerOneAttentionThrottle = map(playerOneAttention, 0,100,0,255);
+// 			int playerTwoAttentionThrottle = map(playerTwoAttention, 0,100,0,255);
+// 			
+// 			analogWrite(playerOneThrottlePin,playerOneAttentionThrottle);
+// 			analogWrite(playerTwoThrottlePin,playerTwoAttentionThrottle);
+// 		}
+// 		if (gameMode == MEDITATION_GAME)
+// 		{
+// 			int playerOneMeditationThrottle = map(playerOneMeditation, 0,100,0,255);
+// 			int playerTwoMeditationThrottle = map(playerTwoMeditation, 0,100,0,255);
+// 			
+// 			analogWrite(playerOneThrottlePin,playerOneMeditationThrottle);
+// 			analogWrite(playerTwoThrottlePin,playerTwoMeditationThrottle);
+// 		}
+		
+	int playerOneAttentionThrottle = map(playerOneAttention, 0,100,0,255);
+	int playerOneMeditationThrottle = map(playerOneMeditation, 0,100,0,255);
+	
+	analogWrite(playerOneThrottlePin,playerOneAttentionThrottle);
+	analogWrite(playerTwoThrottlePin,playerOneMeditationThrottle);
+
+}
+
+
+
+//UPPDATERA SPELLOGIK funktionerna RaceGame(); DeathmatchGame(); och TimeattackGame(); står listade efter varandra
+
+void RaceGame(int playerNum, int numberOfLaps)
+{
+	running = 1;
+	lapNumberOne = 0;
+	lapNumberTwo = 0;
+	if (playerNum == 2)
+	{
+		gameMode = ATTENTION_GAME;
+	}
+
+	while ( running )
+	{
+		
+		//UpdateRaceGameLogic();
+		while (lapNumberOne <= numberOfLaps || lapNumberTwo <= numberOfLaps)
+		{
+			DrawRaceGame();
+			UpdateGameInputs();
+			if (lapStateOne == HIGH && prevLapStateOne == LOW)
+			{
+				if (time > breakTime)
+				{ 
+					breakTime = time + buttPress + 3000;
+					prevLapStateOne = HIGH;
+					lapNumberOne = lapNumberOne + 1;
+				}
+			}
+			else
+			{
+				int prevLapStateOne = LOW;
+			}
+			if (lapStateTwo == HIGH && prevLapStateTwo == LOW)
+			{
+				if (time > breakTime)
+				{
+					breakTime = time + buttPress + 3000;
+					prevLapStateTwo = HIGH;
+					lapNumberTwo = lapNumberTwo + 1;
+				}
+			}
+			else
+			{
+				prevLapStateTwo = LOW;
+			}
+			
+			if (nextState == HIGH) // HELA DENNA BORDE KANSKE STÅ I UpdateGameInputs();
+			{
+				if (time > breakTime)
+				{
+					breakTime = time + buttPress;
+					if (gameMode == ATTENTION_GAME) //denna anropas inte vid 1spelare då gameMode har ett annat försatt värde
+					{
+						gameMode = MEDITATION_GAME;
+						PrintLineColumnText(1,0,"M");
+						PrintLineColumnText(1,8,"M");
+					}
+					else if (gameMode == MEDITATION_GAME) //denna anropas inte vid 1spelare då gameMode har ett annat försatt värde
+					{
+						gameMode = ATTENTION_GAME;
+						PrintLineColumnText(1,0,"A");
+						PrintLineColumnText(1,8,"A");
+					}
+				}
+			}
+			
+			if (lapNumberOne == numberOfLaps)
+			{
+				//SLUT PÅ SPELET ETTAN VANN
+				winner = 1;
+				running = 0;
+				break;
+			}
+			else if (lapNumberTwo == numberOfLaps)
+			{
+				//SLUT PÅ SPELET TVÅAN VANN
+				winner = 2;
+				running = 0;
+				break;
+			}
+		}		
+	}
+	PrintWinner();
+}
+
+void DeathmatchGame(int gameMode, int triggerLevel)
+{
+	running = 1;
+
+	while( running )
+	{
+		DrawDeathMatchGame();
+		while (lapNumberOne <= numberOfLaps || lapNumberTwo <= numberOfLaps) //ändra till BT-variabel som jämförs mot triggerLevel. Kanske ta bort While-loop
+		{
+			UpdateGameInputs();
+			if (lapStateOne == HIGH && prevLapStateOne == LOW)
+			{
+				if (time > breakTime)
+				{
+					breakTime = time + buttPress + 3000;
+					prevLapStateOne = HIGH;
+					lapNumberOne = lapNumberOne + 1;
+				}
+			}
+			else
+			{
+				int prevLapStateOne = LOW;
+			}
+			if (lapStateTwo == HIGH && prevLapStateTwo == LOW)
+			{
+				if (time > breakTime)
+				{
+					breakTime = time + buttPress + 3000;
+					prevLapStateTwo = HIGH;
+					lapNumberTwo = lapNumberTwo + 1;
+				}
+			}
+			else
+			{
+				prevLapStateTwo = LOW;
+			}
+			if (nextState == HIGH)
+			{
+				if (time > breakTime)
+				{
+					breakTime = time + buttPress;
+					if (gameMode == ATTENTION_GAME)
+					{
+						gameMode = MEDITATION_GAME;
+						PrintLineColumnText(1,11,"M");
+					}
+					else if (gameMode == MEDITATION_GAME)
+					{
+						gameMode = ATTENTION_GAME;;
+						PrintLineColumnText(1,11,"A");
+					}				
+				}
+
+			}
+			
+			if (lapNumberOne == 231) //BT-variabel mot triggerLevel GE BOOST, starta nytt?
+			{
+				//SLUT PÅ SPELET ETTAN VANN
+				winner = 1;
+				running = 0;
+				break;
+			}
+			else if (lapNumberTwo == 2331) //BT-variabel mot triggerLevel GE BOOST, starta nytt?
+			{
+				//SLUT PÅ SPELET TVÅAN VANN
+				winner = 2;
+				running = 0;
+				break;
+			}			
+		}
+	}
+	PrintWinner();
+}
+
+void TimeattackGame(int playerNum, int numberOfLaps) //2 spelare kör tills att andra har kommit i mål? eller första? sedan printar dess tid. För 1 spelare blir det attention och meditation som i race.
+{
+	running = 1;
+	lcd.noBlink();
+	
+	while( running )
+	{
+		DrawTimeAttackGame();
+		UpdateGameInputs();
+		/* Do whatever game mode 1 does here*/
+		
+		if (lapStateOne == HIGH && time > breakTime)
+		{
+			breakTime = time + buttPress + 3000;
+			LapCounter();
+		}
+		else if (lapStateTwo == HIGH && time > breakTime)
+		{
+			breakTime = time + buttPress + 3000;
+			LapCounter();
+		}
+		
+		
+		if (winner == 999) //Villkor för att spelare1 skall ha vunnit
+		{
+			//SLUT PÅ SPELET ETTAN VANN
+			winner = 1;
+			running = 0;
+			break;
+		}
+		else if (winner == 9928) //Villkor för att spelare2 skall ha vunnit
+		{
+			//SLUT PÅ SPELET TVÅAN VANN
+			winner = 2;
+			running = 0;
+			break;
+		}
+		UpdateGameOutputs();
+	}
+	PrintWinner();
+}
+
+//Funktion för att räkna antalet varv (kanske borde anropas i UpdateGameInputs();)
+void LapCounter()
+{
+// DENNA BUGGAR SOM FAN NU, MEN ANTAGLIGEN FÖR ATT VARVRÄKNARKNAPPARNA INTE FINNS RIKTIGT
+// 	if (lapStateOne == HIGH && prevLapStateOne == LOW)
+// 	{
+// 		if (time > breakTime)
+// 		{
+// 			breakTime = time + buttPress + 3000;
+// 			prevLapStateOne = HIGH;
+// 			if (timeOneStart != 0)
+// 			{
+// 				//Printa ut tiden typ (time/1000 - timeOneStart)
+// 			}
+// 			lapNumberOne = lapNumberOne + 1;
+// 			timeOneStart = time/1000;
+// 		}
+// 	}
+// 	else
+// 	{
+// 		int prevLapStateOne = LOW;
+// 	}
+// 	if (lapStateTwo == HIGH && prevLapStateTwo == LOW)
+// 	{
+// 		if (time > breakTime)
+// 		{
+// 			breakTime = time + buttPress + 3000;
+// 			prevLapStateTwo = HIGH;
+// 			
+// 			if (timeTwoStart != 0)
+// 			{
+// 				//Printa ut tiden typ (time/1000 - timeOneStart)
+// 			}
+// 			
+// 			lapNumberTwo = lapNumberTwo + 1;
+// 			timeTwoStart = time/1000;
+// 		}
+// 	}
+// 	else
+// 	{
+// 		prevLapStateTwo = LOW;
+// 	}	
+	
+	
+	
+// 	int lapTimeP1 = 0;
+// 	int lapTimeP2 = 0;
+
+// return lapTimeP1; blir inte void med dessa
+// return lapTimeP2;
+}
+
+void PrintLineColumnText(int line, int column, char* stringToPrint)
+{
+	lcd.setCursor(column,line);
+	delay (printDelay);
+	char *tmp = stringToPrint;
+	lcd.print(tmp);
+	delay (printDelay);
+	while( *tmp != 0 )
+	{
+		tmp ++;
+		column ++;
+	}
+	column = column + 1;
+	lcd.setCursor(column,line);
+	lastColumn = column;
+	lastLine = line;
+}
+
+
+// UpdateGameInputs();
+// UpdateGameLogic();
+// UpdateGameOutputs();
+// DrawGame();
